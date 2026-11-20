@@ -1,0 +1,31 @@
+{
+  "note": "テロップの型の見本（2026-11-20）。参考リール上位20本の数え方から、伸びる出し方（中ほど〜少し下・短い言葉・太字）は残し、参考のお店だけの見た目（白太字黒フチ＋赤の強調・上の固定題・中央ロゴ）は使わない。お店ごとに1つ選んで設定に保存する",
+  "position_y": 0.7,
+  "styles": [
+    {
+      "key": "A",
+      "name": "白い角丸の箱に黒の太字",
+      "font": "Noto Sans JP 900",
+      "text": "#111111",
+      "box": "white rounded r22",
+      "sample": "telop-A.png"
+    },
+    {
+      "key": "B",
+      "name": "細長い太字の白文字・要の言葉を黄色",
+      "font": "Anton",
+      "text": "white, uppercase",
+      "outline": "#1A1A1A 4px",
+      "accent": "#FFD400",
+      "sample": "telop-B.png"
+    },
+    {
+      "key": "C",
+      "name": "黄色い帯に黒の太字",
+      "font": "Noto Sans JP 900",
+      "text": "#111111",
+      "band": "#FFD400",
+      "sample": "telop-C.png"
+    }
+  ]
+}

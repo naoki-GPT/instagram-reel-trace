@@ -1,0 +1,11 @@
+# instagram-reel-trace: keep the bundled samples and fonts (the root ignores *.png/*.jpg/*.mp3)
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.mp3
+!assets/fonts/*.ttf
+# run state stays local
+ledger/
+state/
+output/
+.env
+__pycache__/

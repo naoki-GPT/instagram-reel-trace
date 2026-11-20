@@ -1,0 +1,11 @@
+{
+  "note": "声の見本（2026-11-20）。MiniMax speech-2.8-hd・速さ1.1。問いかけと条件のセリフは surprised、ほかは happy。お店ごとに1つ選んで設定に保存する",
+  "model": "speech-2.8-hd",
+  "speed": 1.1,
+  "emotion_rule": {"hook_and_offer": "surprised", "other": "happy"},
+  "voices": [
+    {"key": "A", "name": "明るい店主（中年男性）", "voice_id": "English_Jovialman", "sample": "voice-A-shop-owner.mp3"},
+    {"key": "B", "name": "元気な若い男性", "voice_id": "English_PassionateWarrior", "sample": "voice-B-young-man.mp3"},
+    {"key": "C", "name": "明るい女性", "voice_id": "English_Upbeat_Woman", "sample": "voice-C-upbeat-woman.mp3"}
+  ]
+}

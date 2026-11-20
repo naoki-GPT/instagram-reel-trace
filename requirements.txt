@@ -1,0 +1,10 @@
+# instagram-reel-trace 4.1  (ffmpeg / ffprobe must be on PATH)
+pyyaml
+pillow
+numpy
+opencv-python
+requests
+python-dotenv
+yt-dlp
+faster-whisper
+edge-tts
