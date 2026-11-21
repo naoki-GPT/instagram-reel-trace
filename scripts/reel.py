@@ -1,7 +1,8 @@
-"""Cut-first reel reproduction (instagram-reel-trace v4.0, 2026-11-20).
+"""Cut-first reel reproduction (instagram-reel-trace v4.3, 2026-11-21).
 
-Flow: init -> (AI writes cuts/cut-N.yaml) -> stills -> confirm (ONE question to naoki: images + price + voice + telop)
-      -> order (paid, MiniMax) -> assemble (voice + telop) -> done.
+Flow: init -> (AI writes cuts/cut-N.yaml + overlays + lines with ja) -> stills
+      -> confirm (ONE question: cut images, pasted product images, voice, captions EN/JA, telop, price)
+      -> order (paid, MiniMax) -> assemble (overlays + telop + voice) -> done.
 
   python scripts/reel.py init     <project> (--url URL | --file MP4) --look IMAGE
   python scripts/reel.py frames   <project>                  # re-extract first frames after editing project.yaml
@@ -135,6 +136,7 @@ CUT_TEMPLATE = {
     'room_map': {},
     'remove': ['参考店のロゴ・透かし', '動画の上のテロップ'],
     'keep': [],
+    'talk': False,
     'motion': {'action': '', 'within_sec': 2.0},
     'use': {'in': 0.0},
     'checks': [],
@@ -165,7 +167,9 @@ def cmd_init(a):
                  'person': '(AI: 画像の人物の見た目を英語で。例 short black hair, white T-shirt, navy apron ...)',
                  'room': '(AI: 画像の部屋・店の見た目を英語で)'},
         'cuts': cuts,
-        'lines': [{'caption': '', 'spoken': '', 'start': 0.0, 'end': 0.0, 'voice_start': 0.0, 'emotion': 'happy'}],
+        'lines': [{'caption': '', 'ja': '', 'spoken': '', 'start': 0.0, 'end': 0.0, 'voice_start': 0.0, 'emotion': 'happy'}],
+        # images pasted on top of the video in the reference (not held / not in the room): official images, same time/place/size
+        'overlays': [],   # [{file, start, end, cx_pct, cy_pct, w_pct}]; sources -> assets/sources.json
         'voice': None, 'telop': None, 'cap_jpy': None,
     }
     save(p.yaml, data)
@@ -199,7 +203,29 @@ def cmd_frames(a):
         grid(Image.open(f).convert('RGB')).save(p.src / f"grid-{c['n']}.png")   # read positions in % from this
     sheet([Image.open(p.src / f"ref-{c['n']}.png") for c in d['cuts']], p.out / 'cuts-reference.jpg',
           [f"{c['n']}  {c['start']:.2f}-{c['end']:.2f}s" for c in d['cuts']])
-    log('OK', f'first frames + grids in {p.src}; overview {p.out / "cuts-reference.jpg"}')
+    # every 0.25 s of the whole reference, 32 frames per sheet: check cut edges AND images pasted on top in editing
+    # (cards / boxes that pop up mid-cut) -> list them in project.yaml overlays
+    for old in p.src.glob('scan-*.jpg'):
+        old.unlink()
+    total, step, per = dur(ref), 0.25, 32
+    tw, th = 180, 320
+    for k in range(int(total / step / per) + 1):
+        t0 = k * per * step
+        if t0 >= total:
+            break
+        raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', str(t0), '-t', str(per * step), '-i', str(ref), '-vf',
+                              f'fps={1 / step},scale={tw}:{th}', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True).stdout
+        n_fr = len(raw) // (tw * th * 3)
+        sh = Image.new('RGB', (8 * (tw + 6) + 6, 4 * (th + 30) + 6), 'white')
+        dr = ImageDraw.Draw(sh)
+        for i in range(n_fr):
+            fr = Image.frombytes('RGB', (tw, th), raw[i * tw * th * 3:(i + 1) * tw * th * 3])
+            x, y = 6 + (i % 8) * (tw + 6), 6 + (i // 8) * (th + 30)
+            sh.paste(fr, (x, y + 24))
+            dr.text((x, y), f'{t0 + i * step:.2f}s', fill='black', font=noto(20, 700))
+        sh.save(p.src / f'scan-{k + 1:02d}.jpg', quality=85)
+    log('OK', f'first frames + grids in {p.src}; overview {p.out / "cuts-reference.jpg"}; '
+              f'0.25 s scan sheets {p.src}/scan-*.jpg (look for cut edges and images pasted on top)')
 
 
 # ---------------------------------------------------------------- stills
@@ -450,7 +476,7 @@ def cmd_confirm(a):
                     ov = ov.resize((w, int(ov.height * w / ov.width)))
                     fr.alpha_composite(ov, (int(VW * o['cx_pct'] / 100 - ov.width / 2), int(VH * o['cy_pct'] / 100 - ov.height / 2)))
             frames.append(fr.convert('RGB'))
-            labels.append(f'{t:.1f}秒〜')
+            labels.append(f'カット{cut_n} {t:.1f}秒〜')
         if frames:
             ov_out = p.out / 'confirm-overlays.jpg'
             sheet(frames, ov_out, labels, w=260)
@@ -458,22 +484,71 @@ def cmd_confirm(a):
     vj = json.loads((ASSETS / 'voices' / 'voices.json').read_text(encoding='utf-8'))
     tj = json.loads((ASSETS / 'telop' / 'telop-styles.json').read_text(encoding='utf-8'))
     prev_v, prev_t = d.get('voice'), d.get('telop')
-    msg = [f'対比画像: {out}',
-           f"動画にすると約{jpy}円です（{len(cuts)}カット・合計{sum(clip_sec(c) for c in cuts)}秒分。カットごとの秒数 {[clip_sec(c) for c in cuts]}）。",
-           ]
+    lines = [x for x in d.get('lines') or [] if x.get('caption') or x.get('spoken')]
     talk_cuts = [c['n'] for c in cuts if p.cut(c['n']).get('talk')]
-    over = [ln for ln in d.get('lines') or [] if ln.get('spoken') and line_cut(d, ln) not in talk_cuts]
+    over = [ln for ln in lines if ln.get('spoken') and line_cut(d, ln) not in talk_cuts]
+    # telop A/B/C drawn on a real frame of this video with a real caption (not only on the plain sample)
+    telop_out = None
+    if lines:
+        ln0 = max(lines, key=lambda x: len(x.get('caption') or ''))
+        base = p.stills / f'first-{line_cut(d, ln0)}.png'
+        if base.exists():
+            panels = []
+            for s in tj['styles']:
+                tmp = p.telop / f"confirm-{s['key']}.png"
+                telop_png(s['key'], ln0['caption'], ln0.get('accent', ''), tmp, ln0.get('y', tj.get('position_y', 0.7)))
+                fr = Image.open(base).convert('RGBA').resize((VW, VH))
+                fr.alpha_composite(Image.open(tmp).convert('RGBA'))
+                panels.append(fr)
+            telop_out = p.out / 'confirm-telop.jpg'
+            sheet(panels, telop_out, [f"テロップ{s['key']}" for s in tj['styles']], w=300)
+    msg = ['【1】カットの対比画像（上＝参考／下＝今回）: ' + str(out)]
+    # 2) images pasted on top (official), per cut
+    msg += ['【2】上に貼る商品画像（公式・参考と同じ時刻と位置）:']
+    if ovs:
+        if ov_out:
+            msg += [f'  貼った見本: {ov_out}']
+        for o in ovs:
+            msg += [f"  カット{line_cut(d, {'start': o['start']})} {o['start']:.1f}〜{o['end']:.1f}秒: {o['file']}"]
+    else:
+        msg += ['  なし（参考に、上から貼られた画像はない）']
+    for o in d.get('overlays') or []:
+        if not (p.root / o['file']).exists():
+            msg += [f"  ※画像ファイルがない: {o['file']}（公式から取得して置く）"]
+    # 3) voice
+    msg += ['【3】声:']
     if talk_cuts:
-        msg += [f"話す型のカット: {talk_cuts}（参考の人が話している。動画の中で本人がセリフを話し、口も合う）",
-                f"  その声: {d.get('talk_voice') or 'a bright, energetic young man in his twenties, natural American English'}"]
-    if over or not talk_cuts:
-        msg += ['声（話さないカットに重ねる。ファイルを開くと声だけ流れます）:']
-        msg += [f"  {v['key']} {v['name']}{'（前回）' if v['key'] == prev_v else ''}: {ASSETS / 'voices' / v['sample']}" for v in vj['voices']]
-    msg += [f"テロップ（見本画像）: {ASSETS / 'telop' / 'telop-choices.jpg'}"]
-    msg += [f"  {s['key']} {s['name']}{'（前回）' if s['key'] == prev_t else ''}" for s in tj['styles']]
-    if ov_out:
-        msg += [f'上に重ねる商品画像（公式）の位置: {ov_out}']
-    msg += ['返事の例:「OK・声B・テロップA」／直すカットがあれば「3番直して」も一緒に']
+        opts = d.get('talk_voice_options') or [
+            'a bright, friendly shop owner in his forties, warm natural American English',
+            'a bright, energetic young man in his twenties, natural American English',
+            'a cheerful, upbeat young woman, natural American English']
+        msg += [f"  話す型のカット {talk_cuts}: 本人が話す声は動画と一緒に作られるので、音の見本はありません。声の特徴を選んでください"]
+        msg += [f"    {i + 1}. {o}{'（今の設定）' if o == d.get('talk_voice') else ''}" for i, o in enumerate(opts)]
+    if over:
+        msg += ['  話さないカットに重ねる声（ファイルを開くと声だけ流れます）:']
+        msg += [f"    {v['key']} {v['name']}{'（前回）' if v['key'] == prev_v else ''}: {ASSETS / 'voices' / v['sample']}" for v in vj['voices']]
+    if not lines:
+        msg += ['  なし（セリフのない動画）']
+    # 4) captions per cut, English + Japanese
+    msg += ['【4】カットごとの字幕（英語／日本語訳）:']
+    for c in cuts:
+        cl = [ln for ln in lines if line_cut(d, ln) == c['n']]
+        msg += [f"  カット{c['n']}{'（話す型）' if c['n'] in talk_cuts else ''}:" + ('' if cl else ' 字幕なし')]
+        for ln in cl:
+            msg += [f"    {ln.get('caption', '')}", f"    （{ln.get('ja') or '※日本語訳が未記入'}）"]
+            if ln.get('spoken') and ln['spoken'] != ln.get('caption'):
+                msg += [f"    話す言葉: {ln['spoken']}"]
+    # 5) telop
+    msg += ['【5】テロップの型:' + ('' if lines else ' なし（字幕がない）')]
+    if lines:
+        if telop_out:
+            msg += [f'  この動画に重ねた見本: {telop_out}']
+        msg += [f"    {s['key']} {s['name']}{'（前回）' if s['key'] == prev_t else ''}" for s in tj['styles']]
+    # 6) price
+    msg += [f"【6】料金: 動画にすると約{jpy}円です（{len(cuts)}カット・合計{sum(clip_sec(c) for c in cuts)}秒分。"
+            f"カットごとの秒数 {[clip_sec(c) for c in cuts]}）。"]
+    ex = ['OK'] + (['声の特徴2'] if talk_cuts else []) + (['声B'] if over else []) + (['テロップA'] if lines else [])
+    msg += [f"返事の例:「{'・'.join(ex)}」／直すカットがあれば「3番直して」も一緒に"]
     (p.out / 'confirm.txt').write_text('\n'.join(msg), encoding='utf-8')
     print('\n'.join(msg))
 
@@ -742,7 +817,8 @@ def cmd_assemble(a):
         idx += 1
     mix.append('[base]' + ''.join(f'[s{i}]' for i in voice_files) + f'amix=inputs={len(voice_files) + 1}:normalize=0:duration=first,alimiter=limit=0.95[a]')
     out = p.out / 'final.mp4'
-    ff(*inputs, '-filter_complex', ';'.join(filt + mix), '-map', f'[{vin}]', '-map', '[a]', '-t', end,
+    vmap = vin if vin == '0:v' else f'[{vin}]'   # no captions at all -> the plain input stream, written without brackets
+    ff(*inputs, '-filter_complex', ';'.join(filt + mix), '-map', vmap, '-map', '[a]', '-t', end,
        '-c:v', 'libx264', '-crf', 18, '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out)
     ref = p.root / d['reference']['file']
     cmp_ = p.out / 'compare-2up.mp4'
