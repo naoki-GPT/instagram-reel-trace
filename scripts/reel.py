@@ -157,6 +157,10 @@ def cmd_init(a):
         import yt_dlp
         opts = {'outtmpl': str(ref.with_suffix('.%(ext)s')), 'noplaylist': True, 'noprogress': True, 'format': 'bv*+ba/b',
                 'merge_output_format': 'mp4', 'writeinfojson': True, 'quiet': True, 'no_warnings': True}
+        # Proxied environments whose CA is only in SSL_CERT_FILE fail verification via certifi
+        # (CERTIFICATE_VERIFY_FAILED). Opt-in escape hatch for a proxy the operator trusts.
+        if os.environ.get('REEL_YTDLP_NOCHECKCERTIFICATE') == '1':
+            opts['nocheckcertificate'] = True
         with yt_dlp.YoutubeDL(opts) as y:
             y.download([a.url])
     look = p.root / 'inputs' / ('look' + Path(a.look).suffix)
@@ -669,33 +673,57 @@ def telop_png(style, text, key, path, y_frac):
     d = ImageDraw.Draw(im)
     cy = VH * y_frac
 
-    def fit(t, fn, px, maxw):
-        f = fn(px)
-        while d.textbbox((0, 0), t, font=f)[2] > maxw and px > 20:
-            px -= 2
-            f = fn(px)
-        return f
+    def wrap(t, fn, px, maxw):
+        # split into the fewest lines that each fit maxw at this size (long captions used to
+        # overflow the frame: fit() stopped at 20px and the text still ran past both edges)
+        lines, cur = [], ''
+        for w in t.split():
+            cand = (cur + ' ' + w).strip()
+            if not cur or d.textbbox((0, 0), cand, font=fn(px))[2] <= maxw:
+                cur = cand
+            else:
+                lines.append(cur); cur = w
+        if cur:
+            lines.append(cur)
+        return lines
+
+    def block(lines, fn, px, lh):
+        # (total height, [(line, width)]) for a wrapped block drawn around cy
+        ws = [(t, d.textbbox((0, 0), t, font=fn(px))[2]) for t in lines]
+        return lh * len(lines), ws
 
     if style == 'A':
-        f = fit(text, noto, 52, VW - 140)
-        x0, y0, x1, y1 = d.textbbox((VW / 2, cy), text, font=f, anchor='mm')
-        d.rounded_rectangle((x0 - 26, y0 - 18, x1 + 26, y1 + 18), radius=22, fill='white')
-        d.text((VW / 2, cy), text, font=f, anchor='mm', fill='#111111')
+        px, lh = 52, 64
+        lines = wrap(text, noto, px, VW - 140)
+        th, ws = block(lines, noto, px, lh)
+        wmax = max(w for _, w in ws)
+        d.rounded_rectangle((VW / 2 - wmax / 2 - 26, cy - th / 2 - 18, VW / 2 + wmax / 2 + 26, cy + th / 2 + 18),
+                            radius=22, fill='white')
+        for i, (t, w) in enumerate(ws):
+            d.text((VW / 2, cy - th / 2 + lh * (i + 0.5)), t, font=noto(px), anchor='mm', fill='#111111')
     elif style == 'B':
         up = text.upper()
         anton = lambda px: ImageFont.truetype(str(FONT_ANTON), px)  # noqa: E731
-        f = fit(up, anton, 78, VW - 90)
-        x = (VW - d.textbbox((0, 0), up, font=f)[2]) / 2
-        i = up.find((key or '').upper()) if key else -1
-        parts = [(up[:i], 'white'), (up[i:i + len(key)], '#FFD400'), (up[i + len(key):], 'white')] if i >= 0 else [(up, 'white')]
-        for s, col in parts:
-            d.text((x, cy), s, font=f, anchor='lm', fill=col, stroke_width=4, stroke_fill='#1A1A1A')
-            x += d.textbbox((0, 0), s, font=f)[2]
+        px, lh = 78, 92
+        lines = wrap(up, anton, px, VW - 90)
+        kw = (key or '').upper()
+        for i, t in enumerate(lines):
+            y = cy + lh * (i - (len(lines) - 1) / 2)
+            x = (VW - d.textbbox((0, 0), t, font=anton(px))[2]) / 2
+            j = t.find(kw) if kw else -1
+            parts = [(t[:j], 'white'), (t[j:j + len(kw)], '#FFD400'), (t[j + len(kw):], 'white')] if j >= 0 else [(t, 'white')]
+            for part, col in parts:
+                if part:
+                    d.text((x, y), part, font=anton(px), anchor='lm', fill=col, stroke_width=4, stroke_fill='#1A1A1A')
+                    x += d.textbbox((0, 0), part, font=anton(px))[2]
     else:  # C
-        f = fit(text, noto, 54, VW - 100)
-        x0, y0, x1, y1 = d.textbbox((VW / 2, cy), text, font=f, anchor='mm')
-        d.rectangle((x0 - 22, y0 - 14, x1 + 22, y1 + 14), fill='#FFD400')
-        d.text((VW / 2, cy), text, font=f, anchor='mm', fill='#111111')
+        px, lh = 54, 66
+        lines = wrap(text, noto, px, VW - 100)
+        th, ws = block(lines, noto, px, lh)
+        wmax = max(w for _, w in ws)
+        d.rectangle((VW / 2 - wmax / 2 - 22, cy - th / 2 - 14, VW / 2 + wmax / 2 + 22, cy + th / 2 + 14), fill='#FFD400')
+        for i, (t, w) in enumerate(ws):
+            d.text((VW / 2, cy - th / 2 + lh * (i + 0.5)), t, font=noto(px), anchor='mm', fill='#111111')
     im.save(path)
 
 
