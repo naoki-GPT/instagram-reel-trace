@@ -76,8 +76,12 @@ def log(tag, msg):
     print(f'[{tag}] {msg}', flush=True)
 
 
-def ff(*args):
-    subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-y', *map(str, args)], check=True)
+def ff(*args, timeout=900):
+    """ffmpeg with a time limit: a filter combination that never ends becomes a clear stop instead of a silent wait"""
+    try:
+        subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-y', *map(str, args)], check=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f'[停止] ffmpeg が {timeout} 秒で終わらない（止まっている）: {" ".join(map(str, args))[:300]}')
 
 
 def dur(p):
@@ -740,7 +744,8 @@ def cmd_assemble(a):
                 if lv > -35:
                     log('WARN', f'cut {n}: voice is still sounding at the {where} of the cut ({lv:.0f} dBFS) -> words get cut off. '
                                 'Move the cut boundary in project.yaml (keep the total length) or change use.in')
-            ff('-ss', inp, '-t', length, '-i', clip, *vf, '-af', f'loudnorm=I=-16:TP=-1.5,aresample=48000,apad=whole_dur={length}', *aenc, seg)
+            # no loudnorm here: loudnorm together with a pad filter and video never finishes (2026-11-21); it runs on the joined voice below
+            ff('-ss', inp, '-t', length, '-i', clip, *vf, '-af', f'aresample=48000,apad=whole_dur={length}', *aenc, seg)
         else:
             ff('-ss', inp, '-t', length, '-i', clip, '-f', 'lavfi', '-t', length, '-i', 'anullsrc=r=48000:cl=stereo',
                '-map', '0:v', '-map', '1:a', *vf, *aenc, seg)
@@ -751,7 +756,7 @@ def cmd_assemble(a):
     ff('-f', 'concat', '-safe', 0, '-i', lst, '-c', 'copy', joined)
     end = round(sum(c['end'] - c['start'] for c in d['cuts']), 3)
     clip_wav = p.root / 'work' / 'joined-voice.wav'   # the talk cuts' own voice (silence in the other cuts)
-    ff('-i', joined, '-vn', '-ar', 48000, '-ac', 2, clip_wav)
+    ff('-i', joined, '-vn', *(['-af', 'loudnorm=I=-16:TP=-1.5'] if talk_cuts else []), '-ar', 48000, '-ac', 2, clip_wav)
     # 1b) product images shown on top of the video (official images only), same place and time as in the reference
     #     project.yaml overlays: [{file, start, end, cx_pct, cy_pct, w_pct}]  (center x/y and width in % of the frame)
     ovs = [o for o in d.get('overlays') or [] if (p.root / o['file']).exists()]
