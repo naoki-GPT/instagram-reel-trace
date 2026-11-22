@@ -672,6 +672,9 @@ def telop_png(style, text, key, path, y_frac):
     im = Image.new('RGBA', (VW, VH), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     cy = VH * y_frac
+    if not (text or '').strip():   # spoken-only line (no caption): transparent frame, nothing to draw
+        im.save(path)
+        return
 
     def wrap(t, fn, px, maxw):
         # split into the fewest lines that each fit maxw at this size (long captions used to
