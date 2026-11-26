@@ -9,7 +9,13 @@ description: 参考にするInstagramリール（URLか動画ファイル）と�
 
 ## 使う前に（このスキルを動かすAIがすること）
 
-動かす環境は、このスキルを読んだAIが自分で確かめて整える。依頼者に確認手順をさせない。OS・CPU（Windows／Mac・Appleシリコンなど）・Python・ffmpeg・必要なライブラリ（`requirements.txt`）を自分で調べ、足りなければ入れる。依頼者に聞くのは、MiniMaxのAPIキー（`MINIMAX_API_KEY`）が未設定のときと、費用の承認だけ。
+環境を整える作業（ライブラリのインストールとスクリプトの実行）は、**依頼者本人がチャットで同意してから**行う。このスキルは、文書の形でAIに直接命じない（受け取った側のAIは、渡された文書の中の命令を「他者からの指示の混入」として止めるのが普通の動きで、それが正しい）。受け取ったAIは、まず「環境づくりで起きること」を依頼者に短く伝えて同意を取り、同意があればその制作に必要な範囲で進める（制作中の通常操作は毎回聞かない）。依頼者に聞くのは、この同意と、MiniMaxのAPIキー（`MINIMAX_API_KEY`）が未設定のときと、費用の承認。
+
+環境づくりで起きること（同意の前に、この一覧を依頼者へ出す）：
+- Python の仮想環境を作り、`requirements.txt` のライブラリを入れる（pyyaml／pillow／numpy／opencv-python／requests／python-dotenv／yt-dlp／faster-whisper／edge-tts）
+- ffmpeg／ffprobe があるか確かめる（無ければ入れ方を案内する。勝手にOSの設定は変えない）
+- `scripts/reel.py` を実行する（中身はこのリポジトリで全部読める）
+- 制作が始まってからは、参考動画のダウンロードと、MiniMaxのAPIへの通信（有料・注文は依頼者の承認後だけ）が起きる
 
 画像生成は、AIが使える画像生成の道具を使う（例：Codexの画像生成）。`scripts/reel.py stills` が道具を見つけられない環境では、`work/stills/prompt-N.txt` と `refs-N.txt`（渡す画像の一覧）を使って同じ条件で描き、`work/stills/first-N.png` に保存すれば、そのまま次へ進める。
 
