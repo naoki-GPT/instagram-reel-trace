@@ -136,6 +136,7 @@ CUT_TEMPLATE = {
     'products': [
         {'id': 'P1', 'what': '', 'count': 1, 'layout': '', 'bbox_pct': [0, 0, 0, 0], 'held': '',
          'art': {'colors': [], 'elements': '', 'title': ''}, 'keep_print': True}],
+    'late_products': [],   # products that first appear AFTER the first frame of this cut. Must end up empty: split the cut there.
     'containers': [],
     'room_map': {},
     'remove': ['参考店のロゴ・透かし', '動画の上のテロップ'],
@@ -418,10 +419,36 @@ def estimate_jpy(cuts):
     return sum(cost.estimate('768P', clip_sec(c), ref_image_count=0, ref_video_seconds=0)['total_jpy'] for c in cuts)
 
 
+def late_problems(p, cuts):
+    """A product that is not in the first frame of its cut (and is not an overlay) reaches MiniMax only as words,
+    so MiniMax invents its artwork (2026-11-26: two boxes taken from a shelf mid-cut came out as different boxes).
+    Every cut design must state late_products; a non-empty list means the cut has to be split first."""
+    bad = []
+    for c in cuts:
+        cut = p.cut(c['n'])
+        if 'late_products' not in cut:
+            bad.append(f"カット{c['n']}: 設計書に late_products がない。0.25秒ごとの一覧（work/src/scan-*.jpg）でこのカットを最後まで見て、"
+                       "最初の1コマに写っていない商品が途中で出ないか確かめ、出なければ `late_products: []` と書く")
+        elif cut.get('late_products'):
+            bad.append(f"カット{c['n']}: 途中で初めて出る商品がある {cut['late_products']}。商品がはっきり見える時刻でカットを割り、"
+                       "割った後のカットの最初の1コマ（products）に入れる。割ったら、このカットの late_products を空にする")
+    return bad
+
+
+def stop_if_late(p, cuts):
+    bad = late_problems(p, cuts)
+    if bad:
+        for b in bad:
+            log('STOP', b)
+        log('STOP', '商品の見た目を文章だけで MiniMax に任せると別物になる。直してからやり直す（references/design-yaml.md「途中で初めて出る商品」）')
+        sys.exit(2)
+
+
 def cmd_confirm(a):
     p = P(a.project)
     d = p.data()
     cuts = d['cuts']
+    stop_if_late(p, cuts)
     w, h = 300, 533
     rows = 2
     zooms = []
@@ -511,6 +538,13 @@ def cmd_confirm(a):
             telop_out = p.out / 'confirm-telop.jpg'
             sheet(panels, telop_out, [f"テロップ{s['key']}" for s in tj['styles']], w=300)
     msg = ['【1】カットの対比画像（上＝参考／下＝今回）: ' + str(out)]
+    # how each product gets into the video, per cut (drawn in the first frame / pasted on top / none)
+    msg += ['  商品の出し方（カットごと。この2つ以外の出し方はしない）:']
+    for c in cuts:
+        drawn = [f"{x.get('id')} {x.get('what', '')}".strip() for x in p.cut(c['n']).get('products') or [] if any(x.get('bbox_pct') or [])]
+        pasted = [o['file'] for o in d.get('overlays') or [] if line_cut(d, {'start': o['start']}) == c['n']]
+        parts = ([f"最初の1コマに描く＝{'、'.join(drawn)}"] if drawn else []) + ([f"公式画像を貼る＝{'、'.join(pasted)}"] if pasted else [])
+        msg += [f"    カット{c['n']}: " + ('／'.join(parts) if parts else '商品は映らない')]
     # 2) images pasted on top (official), per cut
     msg += ['【2】上に貼る商品画像（公式・参考と同じ時刻と位置）:']
     if ovs:
@@ -603,6 +637,7 @@ def cmd_order(a):
     from lib.common import probe_summary
     p = P(a.project)
     d = p.data()
+    stop_if_late(p, d['cuts'])
     ledger = p.root / 'orders.json'
     st = json.loads(ledger.read_text(encoding='utf-8')) if ledger.exists() else {}
     spent = lambda: sum(v.get('actual_jpy') or v.get('estimated_jpy') or 0 for v in st.values())  # noqa: E731

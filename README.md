@@ -1,6 +1,6 @@
 # instagram-reel-trace
 
-参考にするInstagramリール（URLか動画ファイル）と、人物＋お店の画像1枚から、自社撮影なしで同じ構成の縦型リールを作るスキル（版4.3）。
+参考にするInstagramリール（URLか動画ファイル）と、人物＋お店の画像1枚から、自社撮影なしで同じ構成の縦型リールを作るスキル（版4.4）。
 
 使い方と決まりは [SKILL.md](SKILL.md)、設計書の書き方は [references/design-yaml.md](references/design-yaml.md)。
 

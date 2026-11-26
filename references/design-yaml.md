@@ -1,6 +1,6 @@
 # 設計書（カットごとのYAML）の書き方
 
-版4.3（2026-11-21）。最初の1コマを描く前に、カットごとに `cuts/cut-N.yaml` を書く。目的は、参考のコマを**商品まで含めて完全に再現する**こと。画像AIは商品を写さず描き直すため、言葉と数字で縛らないと「似た別物」になる（2026-11-20、箱2つが1本に合体した）。
+版4.4（2026-11-26）。最初の1コマを描く前に、カットごとに `cuts/cut-N.yaml` を書く。目的は、参考のコマを**商品まで含めて完全に再現する**こと。画像AIは商品を写さず描き直すため、言葉と数字で縛らないと「似た別物」になる（2026-11-20、箱2つが1本に合体した）。
 
 ## 原則
 
@@ -18,6 +18,7 @@
 | `camera` | 高さ・角度・レンズ（広角など）・どこで切れているか | 指示文 |
 | `person` | 位置（％）・体の向き・手・視線・表情 | 指示文 |
 | `products[]` | `id`・`what`・`count`・`layout`・`bbox_pct`・`held`・`art`（`colors`・`elements`・`title`）・`keep_print` | 指示文の先頭。`bbox_pct` から商品の拡大を切り抜き、3枚目の画像としてAIに渡す。生成後の数値チェックもこの範囲で行う |
+| `late_products` | そのカットの途中で初めて画面に出る商品（最初の1コマに写っていない物）。**どのカットにも必ず書く。** なければ `[]` | 空でなければ `confirm` と `order` が止まる。下の「途中で初めて出る商品」のとおりカットを割ってから空にする |
 | `containers[]` | 段ボール・ケースなど、商品以外で形を保つ物 | 指示文 |
 | `room_map` | 参考の場所 → 新しい部屋の何にするか | 指示文（倉庫が残るのを防ぐ） |
 | `remove` / `keep` | 消すもの・必ず残すもの | 指示文 |
@@ -42,6 +43,18 @@ overlays:
 
 **画像は透明な余白を切り取ってから置く。** 公式画像はキャンバスの中央に小さく絵がある形が多く（2026-11-21の試作ではパック画像の中身が幅の約42％しかなかった）、余白つきのままでは `w_pct` を参考どおりに書いても実際は小さく貼られる。`w_pct` は「中身の幅」として扱い、余白は取得時にトリミングする。
 
+## 途中で初めて出る商品（`late_products`）
+
+商品を参考と同じにできるのは、最初の1コマに描いたとき（`products`）と、公式の画像を上から貼ったとき（`overlays`）だけ。MiniMaxには描いた1コマと動きの文章しか渡せないので、**最初の1コマに写っていない商品は、文章に名前を書いても別の絵柄になる**（2026-11-26、「棚から箱を取る」と書いた箱2つが別の箱になった）。
+
+1. `work/src/scan-*.jpg` でカットを最後まで見て、商品ごとに「初めて画面に出る時刻」を拾う。棚から取る・画面の外から持ってくる・箱から出す・裏返して別の面を見せる、も含む。
+2. カットの途中で出る商品を、いったん `late_products` に書く（例：`late_products: ['30th Celebration box, taken from the shelf at 9.5s']`）。
+3. その商品の絵柄がはっきり見える最初の時刻で、`project.yaml` の cuts を割る。割った後のカットは、商品を持った（置いた）コマを `first_frame` にし、`products` に細かく書く。`lines` の時刻もカットの境目にそろえる。
+4. 割る前のカットの `motion.action` には、商品を書かない（例：`she turns to the shelf and reaches toward it`）。取りに行く動きが短ければ、そのカットを省いてよい。1回の注文は最短4秒なので、短いカットは作った4秒の一部を使う。
+5. 割り終えたら `late_products: []` に戻す。
+
+割った境目では、人物の位置や手の形が少し飛ぶことがある。境目の前後のコマを並べて確かめ、気になる飛び方なら確認のときに伝える。
+
 ## 例（カット2・箱を2つ持って歩く）
 
 ```yaml
@@ -62,6 +75,7 @@ products:
     elements: 'left box: Pikachu-themed multicolor artwork with many Pikachu; right box: red, blue and white Pokemon artwork with Pikachu at the lower right'
     title: 'left: Japanese title at its right part; right: title near the center'
   keep_print: true
+late_products: []
 room_map: {left white shelves: black shop shelves full of booster boxes, back wall: the shop sign and the top shelves of the look image, right blue crate stacks: keep}
 remove: [参考店のロゴ・透かし, 動画の上のテロップ]
 motion: {action: he holds the two booster boxes at chest height and takes slow small steps toward the camera, within_sec: 2.0}
